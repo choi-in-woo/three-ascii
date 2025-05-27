@@ -1,8 +1,7 @@
 import {
   WebGLRenderTarget,
   LinearFilter,
-  RGBAFormat,
-  UnsignedByteType,
+  RGBFormat,
   Vector2
 } from 'three'
 
@@ -20,86 +19,65 @@ export class AsciiEffect {
     this.width = Math.floor(size.x * this.resolution)
     this.height = Math.floor(size.y * this.resolution)
 
-    this.renderTarget = new WebGLRenderTarget(this.width, this.height, {
-      format: RGBAFormat,
-      type: UnsignedByteType,
-      depthBuffer: false,
-      stencilBuffer: false
-    })
+    this.renderTarget = new WebGLRenderTarget(this.width, this.height)
     this.renderTarget.texture.minFilter = LinearFilter
     this.renderTarget.texture.magFilter = LinearFilter
+    this.renderTarget.texture.format = RGBFormat
+
+    this.canvas = document.createElement('canvas')
+    this.canvas.width = this.width
+    this.canvas.height = this.height
+    this.context = this.canvas.getContext('2d', { willReadFrequently: true })
 
     this.domElement = document.createElement('pre')
     this.domElement.style.whiteSpace = 'pre'
-    this.domElement.style.display = 'block'
-    this.domElement.style.margin = '0 auto'
-    this.domElement.style.transform = 'scaleY(-1)' // 세로 반전 복구
-    this.setSize(size.x, size.y)
-
-    this.buffer = new Uint8Array(this.width * this.height * 4)
-    this.lineDelays = []
-    this.lineElapsed = []
+    this.domElement.style.fontFamily = 'monospace'
+    this.domElement.style.margin = '0'
+    this.domElement.style.padding = '0'
+    this.domElement.style.userSelect = 'none'
+    this.domElement.style.backgroundColor = 'transparent'
+    this.domElement.style.color = 'black'
+    this.domElement.style.pointerEvents = 'none'
   }
 
   setSize(width, height) {
     this.width = Math.floor(width * this.resolution)
     this.height = Math.floor(height * this.resolution)
     this.renderTarget.setSize(this.width, this.height)
-    this.buffer = new Uint8Array(this.width * this.height * 4)
-    this.lineDelays = Array(this.width).fill(0).map(() => Math.random() * 1000)
-    this.lineElapsed = Array(this.width).fill(0)
+    this.canvas.width = this.width
+    this.canvas.height = this.height
   }
 
-  setCharacters(characters) {
-    this.characters = characters
-    this.charTable = characters.split('')
-    this.charTableLen = this.charTable.length
-  }
-
-  render(scene, camera, delta = 16) {
-    const originalAlpha = this.renderer.getClearAlpha()
-    this.renderer.setClearAlpha(0)
-
+  render(scene, camera) {
     this.renderer.setRenderTarget(this.renderTarget)
-    this.renderer.clear()
     this.renderer.render(scene, camera)
-    this.renderer.readRenderTargetPixels(
-      this.renderTarget,
-      0, 0,
-      this.width, this.height,
-      this.buffer
-    )
     this.renderer.setRenderTarget(null)
-    this.renderer.setClearAlpha(originalAlpha)
 
+    this.context.drawImage(this.renderer.domElement, 0, 0, this.width, this.height)
+
+    const imageData = this.context.getImageData(0, 0, this.width, this.height).data
     let output = ''
+
     for (let y = 0; y < this.height; y++) {
       let line = ''
       for (let x = 0; x < this.width; x++) {
-        this.lineElapsed[x] += delta
-        const showPixel = this.lineElapsed[x] >= this.lineDelays[x]
+        const index = (y * this.width + x) * 4
+        const r = imageData[index]
+        const g = imageData[index + 1]
+        const b = imageData[index + 2]
 
-        const i = ((this.height - 1 - y) * this.width + x) * 4 // 좌표 보정
-        const r = this.buffer[i]
-        const g = this.buffer[i + 1]
-        const b = this.buffer[i + 2]
-        const a = this.buffer[i + 3]
-
-        if (a < 10 || !showPixel) {
+        // 밝은 배경 무시
+        if (r > 245 && g > 245 && b > 245) {
           line += ' '
-          continue
+        } else {
+          const brightness = (r + g + b) / 3
+          const charIndex = Math.floor((brightness / 255) * (this.charTableLen - 1))
+          line += this.charTable[this.invert ? this.charTableLen - 1 - charIndex : charIndex]
         }
-
-        const brightness = (r + g + b) / 3
-        const index = this.invert
-          ? this.charTableLen - 1 - Math.floor((brightness / 255) * (this.charTableLen - 1))
-          : Math.floor((brightness / 255) * (this.charTableLen - 1))
-        line += this.charTable[index]
       }
       output += line + '\n'
     }
 
-    this.output = output
     this.domElement.textContent = output
   }
 }
